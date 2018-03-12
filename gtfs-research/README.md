@@ -23,7 +23,7 @@ Musste selbst ergänzt werden, da im geOps Datensatz zusätzliche Felder vorkomm
 ### Beispiele
 - Alle Ankunfts- und Abfahrtszeiten an einer Haltestelle
 ``` sql
-select * from stop_times where stop_id = '8588098';'
+select * from stop_times where stop_id = '8588098';
 ```
 
 ## Integration
