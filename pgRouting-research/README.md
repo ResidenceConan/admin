@@ -26,7 +26,7 @@ select sub.rid, sub.height from (select rid, ST_Value(rast, 1, ST_GeomFromText('
 ```
 ### Links
 
-* [raster2pgsql Tutorial](suite.opengeo.org/docs/latest/dataadmin/pgGettingStarted/raster2pgsql.html)
+* [raster2pgsql Tutorial](http://suite.opengeo.org/docs/latest/dataadmin/pgGettingStarted/raster2pgsql.html)
 * [ST_Value_Count](https://postgis.net/2014/09/26/tip_count_of_pixel_values/)
 * [ST_Value](https://postgis.net/docs/manual-dev/RT_ST_Value.html)
 
