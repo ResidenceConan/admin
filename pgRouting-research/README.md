@@ -108,19 +108,34 @@ END
 $BODY$
   LANGUAGE plpgsql
 
-SELECT * FROM segments(1, 100);
+SELECT * FROM segments(28, 100);
 ```
 
 get start and end points for each segment
 
 ```
 -- get start and end points
-SELECT st_x(st_startpoint(geom)) AS start_x,
-       st_y(st_startpoint(geom)) AS start_y,
-       st_x(st_endpoint(geom)) AS end_x,
-       st_y(st_endpoint(geom)) AS end_y
-       FROM segments(1, 100);
+SELECT st_startpoint(geom) AS start,
+       st_endpoint(geom) AS end
+       FROM segments(28, 100);
 ```
+
+transform point to 2056
+
+```
+CREATE OR REPLACE FUNCTION transform_to_2056(geom geometry)
+    RETURNS TABLE(height geometry) as
+$BODY$   
+    SELECT ST_Transform(ST_SetSRID($1, 4326), 2056);
+$BODY$
+      LANGUAGE sql;
+
+SELECT ST_AsText(transform_to_2056(st_startpoint(geom))) AS start,
+       ST_AsText(transform_to_2056(st_endpoint(geom))) AS end
+       FROM segments(28, 100);
+-- test points on https://map.geo.admin.ch
+```
+
 
 get the height for a specific point
 
@@ -129,11 +144,15 @@ get the height for a specific point
 CREATE OR REPLACE FUNCTION get_height(geom geometry)
     RETURNS TABLE(height double precision) as
 $BODY$   
-    select sub.height from (select rid, ST_Value(rast, 1, $1) as height from swissalti3d) as sub where sub.height > 0;
+    select sub.height from (select rid, ST_Value(ST_SetSRID(rast, 2056), 1, $1) as height from swissalti3d) as sub where sub.height > 0;
 $BODY$
       LANGUAGE sql;
 
-select * from get_height(ST_GeomFromText('POINT(2759519.0304392 1191991.26991665)', 21781));
+select * from get_height(ST_GeomFromText('POINT(2759519.0304392 1191991.26991665)', 2056));
+
+SELECT get_height(transform_to_2056(st_startpoint(geom))) AS start,
+       get_height(transform_to_2056(st_endpoint(geom))) AS end
+       FROM segments(28, 100);
 ```
 
 calculate incline
