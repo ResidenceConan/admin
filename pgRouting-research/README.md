@@ -139,27 +139,32 @@ select * from get_height(ST_GeomFromText('POINT(2759519.0304392 1191991.26991665
 calculate incline
 
 ```
+TODO
 ```
 
 calculate incline_metres_in_altitude
 
 ```
+TODO
 ```
 
 calculate slope
 
 ```
+TODO
 ```
 
 calculate slope_metres_in_altitude
 
 ```
+TODO
 ```
 
-calculate effective_kilometers
-effective_kilometers = distance + incline_metres_in_altitude/100 + slope_metres_in_altitude/150 (if slope_metres_in_altitude/slope > 20%)
+calculate effective_kilometers ([see Leistungskilometer](https://de.wikipedia.org/wiki/Leistungskilometer))
+> effective_kilometers = distance + incline_metres_in_altitude/100 + slope_metres_in_altitude/150 (if slope_metres_in_altitude/slope > 20%)
 
 ```
+TODO
 ```
 
 ### Links
