@@ -5,6 +5,7 @@
 ## load rasters into pgsql
 
 ```
+CREATE EXTENSION pgrouting;
 CREATE EXTENSION postgis;
 -- ALTER SYSTEM SET postgis.enable_outdb_rasters TO True;
 -- ALTER SYSTEM SET postgis.gdal_enabled_drivers TO 'ENABLE_ALL';
@@ -16,10 +17,12 @@ CREATE EXTENSION postgis;
 gdalinfo swissALTI3D.tif
 
 -- load tif into pgsql
-raster2pgsql -s 21781 -d -I -C -M swissALTI3D.tif -F -t 100x100 public.swissalti3d | psql --username=postgres -d isochrone
+raster2pgsql -s 2056 -d -I -C -M swissALTI3D.tif -t 100x100 public.swissalti3d | psql --username=postgres -d <db-name>
 
--- retrieve height for a specific point (really slow and ugly query, bear with me)
-select sub.rid, sub.height from (select rid, ST_Value(rast, 1, ST_GeomFromText('POINT(2761212 1193751)', 21781)) as height from swissalti3d) as sub where sub.height > 0;
+-- retrieve height for a specific point
+select sub.rid, ST_Value(sub.rast, 1, ST_GeomFromText('POINT(2759519.0304392 1191991.26991665)', 2056)) as height from
+  (select rid, rast from swissalti3d where ST_Intersects(rast, ST_GeomFromText('POINT(2759519.0304392 1191991.26991665)', 2056))) as sub;
+
 ```
 ### Links
 
@@ -27,27 +30,18 @@ select sub.rid, sub.height from (select rid, ST_Value(rast, 1, ST_GeomFromText('
 * [ST_Value_Count](https://postgis.net/2014/09/26/tip_count_of_pixel_values/)
 * [ST_Value](https://postgis.net/docs/manual-dev/RT_ST_Value.html)
 
-### Notes
-
-* is CH1903+(2056)  or CH1903(21781) used?
-
 ## isochrones
 
 
 create database and fill it with OSM data
 
 ```
-CREATE DATABASE routing;
-CREATE EXTENSION postgis;
-CREATE EXTENSION pgrouting;
-
--- not sure about the encoding, UTF-8 will display a warning
-shp2pgsql -W "LATIN1" chur_lines.shp public.routing > chur_lines.sql
+shp2pgsql -s 2056 -d chur_lines.shp public.routing > chur_lines.sql
 
 -- import with osm2pgsql instead
 osm2pgsql -E 2056 -d routing -U postgres -H localhost -P 5432 -W chur.osm
 
-\c routing
+\c <db-name>
 \i chur_lines.sql
 ```
 
@@ -88,30 +82,31 @@ UPDATE routing SET x1 = st_x(st_startpoint(geom)),
                    y1 = st_y(st_startpoint(geom)),
                    x2 = st_x(st_endpoint(geom)),
                    y2 = st_y(st_endpoint(geom)),
-                   cost_len  = st_length_spheroid(geom, 'SPHEROID["WGS84",6378137,298.25728]');
+                   cost_len = st_length_spheroid(ST_transform(st_setsrid(geom, 2056), 4326), 'SPHEROID["WGS84",6378137,298.25728]');
+-- TODO: fix unnecessary transformation                   
 ```
 
 IDEA: split a line into segments and calculate for each segment the incline and slope
 
 ```
-CREATE OR REPLACE FUNCTION segments(IN integer)
+CREATE OR REPLACE FUNCTION segments(gid_input integer, segment_length integer)
   RETURNS TABLE(geom geometry) AS
 $BODY$
 BEGIN
    RETURN QUERY
-   SELECT ST_LineSubstring(the_geom, $1*n/length,
+   SELECT ST_LineSubstring(the_geom, segment_length*n/length,
    CASE
-	WHEN $1*(n+1) < length THEN $1*(n+1)/length
+	WHEN segment_length*(n+1) < length THEN segment_length*(n+1)/length
 	ELSE 1
    END) As new_geom
    FROM
-        (SELECT ST_LineMerge(routing.geom) AS the_geom, cost_len As length FROM routing where gid = 1) AS t
-   CROSS JOIN generate_series(0,10000) AS n WHERE n*$1/length < 1;
+        (SELECT ST_LineMerge(routing.geom) AS the_geom, cost_len As length FROM routing where routing.gid = gid_input) AS t
+   CROSS JOIN generate_series(0,10000) AS n WHERE n*segment_length/length < 1;
 END
 $BODY$
   LANGUAGE plpgsql
 
-SELECT * FROM segments(28, 100);
+SELECT * FROM segments(1, 100);
 ```
 
 get start and end points for each segment
@@ -120,10 +115,10 @@ get start and end points for each segment
 -- get start and end points
 SELECT st_startpoint(geom) AS start,
        st_endpoint(geom) AS end
-       FROM segments(28, 100);
+       FROM segments(1, 100);
 ```
 
-transform point to 2056
+transform 4326 point to 2056 (not necessary if osm file is imported with srid 2056)
 
 ```
 CREATE OR REPLACE FUNCTION transform_to_2056(geom geometry)
@@ -132,10 +127,14 @@ $BODY$
     SELECT ST_Transform(ST_SetSRID($1, 4326), 2056);
 $BODY$
       LANGUAGE sql;
+```
 
-SELECT ST_AsText(transform_to_2056(st_startpoint(geom))) AS start,
-       ST_AsText(transform_to_2056(st_endpoint(geom))) AS end
-       FROM segments(28, 100);
+get point as text
+
+```
+SELECT ST_AsText(st_startpoint(geom)) AS start,
+       ST_AsText(st_endpoint(geom)) AS end
+       FROM segments(1, 100);
 -- test points on https://map.geo.admin.ch
 ```
 
@@ -147,15 +146,16 @@ get the height for a specific point
 CREATE OR REPLACE FUNCTION get_height(geom geometry)
     RETURNS TABLE(height double precision) as
 $BODY$   
-    select sub.height from (select rid, ST_Value(ST_SetSRID(rast, 2056), 1, $1) as height from swissalti3d) as sub where sub.height > 0;
+    select ST_Value(ST_SetSRID(sub.rast, 2056), 1, $1) as height from
+      (select rid, rast from swissalti3d where ST_Intersects(ST_SetSRID(rast, 2056), $1)) as sub;
 $BODY$
       LANGUAGE sql;
 
 select * from get_height(ST_GeomFromText('POINT(2759519.0304392 1191991.26991665)', 2056));
 
-SELECT get_height(transform_to_2056(st_startpoint(geom))) AS start,
-       get_height(transform_to_2056(st_endpoint(geom))) AS end
-       FROM segments(28, 100);
+SELECT get_height(st_startpoint(geom)) AS start,
+       get_height(st_endpoint(geom)) AS end
+       FROM segments(1, 100);
 ```
 
 calculate incline
