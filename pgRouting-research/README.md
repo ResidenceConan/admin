@@ -44,6 +44,9 @@ CREATE EXTENSION pgrouting;
 -- not sure about the encoding, UTF-8 will display a warning
 shp2pgsql -W "LATIN1" chur_lines.shp public.routing > chur_lines.sql
 
+-- import with osm2pgsql instead
+osm2pgsql -E 2056 -d routing -U postgres -H localhost -P 5432 -W chur.osm
+
 \c routing
 \i chur_lines.sql
 ```
