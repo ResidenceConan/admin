@@ -89,7 +89,7 @@ UPDATE routing SET x1 = st_x(st_startpoint(geom)),
 IDEA: split a line into segments and calculate for each segment the incline and slope
 
 ```
-CREATE OR REPLACE FUNCTION segments(gid_input integer, segment_length integer)
+CREATE OR REPLACE FUNCTION segments(gid_input integer, segment_length integer default 100)
   RETURNS TABLE(geom geometry) AS
 $BODY$
 BEGIN
@@ -158,35 +158,76 @@ SELECT get_height(st_startpoint(geom)) AS start,
        FROM segments(1, 100);
 ```
 
-calculate incline
+calculate incline and decline, incline_metres_in_altitude, decline_metres_in_altitude
 
 ```
-TODO
+-- function is not really necessary, keeping it for further help writing functions
+CREATE OR REPLACE FUNCTION slope(gid_input integer) RETURNS RECORD AS $$
+DECLARE
+  ret RECORD;
+  segment RECORD;
+  incline INTEGER := 0;
+  decline INTEGER := 0;
+  incline_metres_in_altitude DOUBLE PRECISION := 0.0;
+  decline_metres_in_altitude DOUBLE PRECISION := 0.0;
+BEGIN
+  FOR segment IN
+    SELECT get_height(st_startpoint(geom)) AS start, get_height(st_endpoint(geom)) AS destination FROM segments($1, 1)
+  LOOP
+    IF segment.start < segment.destination THEN
+      incline := incline + 1;
+      incline_metres_in_altitude := incline_metres_in_altitude + (segment.destination - segment.start);
+    ELSEIF segment.start > segment.destination THEN
+      decline := decline + 1;
+      decline_metres_in_altitude := decline_metres_in_altitude + segment.start - segment.destination;
+    ELSE
+      -- and now what?
+    END IF;
+  END LOOP;
+  SELECT incline, decline, incline_metres_in_altitude, decline_metres_in_altitude INTO ret;
+RETURN ret;
+END;$$ LANGUAGE plpgsql;
+
+SELECT * FROM slope(1) as(incline INTEGER, decline INTEGER, incline_metres_in_altitude DOUBLE PRECISION, decline_metres_in_altitude DOUBLE PRECISION);
 ```
 
-calculate incline_metres_in_altitude
-
-```
-TODO
-```
-
-calculate slope
-
-```
-TODO
-```
-
-calculate slope_metres_in_altitude
-
-```
-TODO
-```
 
 calculate effective_kilometers ([see Leistungskilometer](https://de.wikipedia.org/wiki/Leistungskilometer))
 > effective_kilometers = distance + incline_metres_in_altitude/100 + slope_metres_in_altitude/150 (if slope_metres_in_altitude/slope > 20%)
 
 ```
-TODO
+CREATE OR REPLACE FUNCTION calc_effective_kilometers(gid_input integer) RETURNS DOUBLE PRECISION AS $$
+DECLARE
+  segment RECORD;
+  distance DOUBLE PRECISION;
+  incline INTEGER := 0;
+  decline INTEGER := 0;
+  incline_metres_in_altitude DOUBLE PRECISION := 0.0;
+  decline_metres_in_altitude DOUBLE PRECISION := 0.0;
+  effective_kilometers DOUBLE PRECISION := 0;
+BEGIN
+  FOR segment IN
+    SELECT get_height(st_startpoint(geom)) AS start, get_height(st_endpoint(geom)) AS destination FROM segments($1, 1)
+  LOOP
+    IF segment.start < segment.destination THEN
+      incline := incline + 1;
+      incline_metres_in_altitude := incline_metres_in_altitude + (segment.destination - segment.start);
+    ELSEIF segment.start > segment.destination THEN
+      decline := decline + 1;
+      decline_metres_in_altitude := decline_metres_in_altitude + segment.start - segment.destination;
+    END IF;
+  END LOOP;
+  select st_length_spheroid(ST_transform(st_setsrid(geom, 2056), 4326), 'SPHEROID["WGS84",6378137,298.25728]') into distance from routing where gid = $1;
+  effective_kilometers := distance + incline_metres_in_altitude/100;
+  IF decline != 0 AND decline_metres_in_altitude/decline > 0.2 THEN
+    effective_kilometers := effective_kilometers + decline_metres_in_altitude/150;
+  END IF;
+  RETURN effective_kilometers;
+END;
+$$ LANGUAGE plpgsql;
+
+select * from calc_effective_kilometers(1);
+UPDATE routing SET cost_len = calc_effective_kilometers(gid); -- does take some time
 ```
 
 ### Links
