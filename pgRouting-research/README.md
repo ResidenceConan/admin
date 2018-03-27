@@ -38,8 +38,9 @@ select sub.rid, ST_Value(sub.rast, 1, ST_GeomFromText('POINT(2759519.0304392 119
 
 create database and fill it with OSM data
 
-```bash
-shp2pgsql -s 2056 -d chur_lines.shp public.routing > chur_lines.sql
+bash
+```
+osm2pgrouting --f chur.osm --conf /usr/local/share/osm2pgrouting/mapconfig_for_pedestrian.xml --dbname routing --username postgres --clean
 
 -- import with osm2pgsql instead
 osm2pgsql -E 2056 -d routing -U postgres -H localhost -P 5432 -W chur.osm
@@ -234,7 +235,7 @@ UPDATE routing SET cost_len = calc_effective_kilometres(gid); -- does take some 
 ```
 
 ### Links
-
+* [osm2pgrouting](https://github.com/pgRouting/osm2pgrouting)
 * [Drive-time Isochrones from a single Shapefile using QGIS](https://anitagraser.com/2017/09/11/drive-time-isochrones-from-a-single-shapefile-using-qgis-postgis-and-pgrouting/)
 * [Public transport isochrones with pgRouting](https://anitagraser.com/2013/07/07/public-transport-isochrones-with-pgrouting/)
   * the travel time is used as the cost
