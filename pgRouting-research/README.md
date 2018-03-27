@@ -38,8 +38,7 @@ select sub.rid, ST_Value(sub.rast, 1, ST_GeomFromText('POINT(2759519.0304392 119
 
 create database and fill it with OSM data
 
-bash
-```
+``` bash
 osm2pgrouting --f chur.osm --conf /usr/local/share/osm2pgrouting/mapconfig_for_pedestrian.xml --dbname routing --username postgres --clean
 
 -- import with osm2pgsql instead
@@ -233,6 +232,59 @@ $$ LANGUAGE plpgsql;
 select * from calc_effective_kilometres(1);
 UPDATE routing SET cost_len = calc_effective_kilometres(gid); -- does take some time
 ```
+
+### Isochrones mit Segmenten
+
+Problem: Eine Kante im Routing-Graphen geht jeweils von einem Startpunkt des Ways bis zu Endpunkt, bzw. zur nächsten Kreuzung.
+Dementsprechend geben Isochrone nur Strassen an, die "bis zum Ende" erreicht werden. Sie werden verworfen, wenn irgendwo auf einer Strasse (kann mehrere km lang sein) das Limit erreicht wird.
+Wir brauchen eine kleinere Auflösung des Routing-Graphen.
+
+Idee: Mit `segments()` die Strassen (Ways) unterteilen und damit den Routing-Graphen aufbauen:
+
+Tabelle für neue Ways vorbereiten
+```sql
+CREATE TABLE ways_segments (
+    id serial primary key,
+    geom geometry(LINESTRING, 4326),
+    source integer,
+    target integer,
+    cost_len double precision,
+    x1 double precision,
+    y1 double precision,
+    x2 double precision,
+    y2 double precision;
+);
+```
+
+Segmente aufsplitten (hier in 10m Segmente)
+```sql
+INSERT INTO ways_segments(geom)
+    SELECT new_geom FROM ways
+        CROSS JOIN segments(gid::integer, 10) as new_geom;
+```
+
+Routing-Topologie erstellen (als Toleranz wird ca. 10m umgerechnet in WGS84-Grad gewählt, sonst gibt es zu wenige Vertices)
+```sql
+SELECT pgr_createTopology('ways_segments', 0.0000895, 'geom', 'id', 'source', 'target');
+```
+
+Restliche Spalten befüllen
+```sql
+UPDATE ways_segments SET x1 = st_x(st_startpoint(geom)),
+                   y1 = st_y(st_startpoint(geom)),
+                   x2 = st_x(st_endpoint(geom)),
+                   y2 = st_y(st_endpoint(geom)),
+                   cost_len = st_length_spheroid(geom, 'SPHEROID["WGS84",6378137,298.25728]');
+```
+
+Tabelle mit Linien als Isochrone ausgeben (Start-vertex 10262, 500m Distanz)
+```sql
+SELECT * FROM ways_segments WHERE id IN (
+    SELECT edge
+    FROM pgr_drivingdistance('select id, source, target, cost_len as cost from ways_segments', 10262, 500)
+    );
+```
+
 
 ### Links
 * [osm2pgrouting](https://github.com/pgRouting/osm2pgrouting)
